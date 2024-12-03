@@ -459,12 +459,16 @@ export default function ClientTracker() {
         const priorityDiff = getStatusPriority(statusA) - getStatusPriority(statusB);
         if (priorityDiff !== 0) return priorityDiff;
 
-        const percentageA = (_productA!.current / (utilizationType === 'annual'
-          ? (_productA!.annualQty || _productA!.contracted)
-          : (_productA!.termQty || _productA!.contracted))) * 100;
-        const percentageB = (_productB!.current / (utilizationType === 'annual'
-          ? (_productB!.annualQty || _productB!.contracted)
-          : (_productB!.termQty || _productB!.contracted))) * 100;
+        // Within same status, sort by percentage
+        const getPercentage = (product: Product) => {
+          const contracted = utilizationType === 'annual'
+            ? (product.annualQty || product.contracted)
+            : (product.termQty || product.contracted);
+          return (product.current / contracted) * 100;
+        };
+
+        const percentageA = getPercentage(productA!);
+        const percentageB = getPercentage(productB!);
         return percentageA - percentageB;
       }
 
