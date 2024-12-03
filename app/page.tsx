@@ -245,12 +245,6 @@ export default function ClientTracker() {
   } | null>(null);
   const [importData, setImportData] = useState<ImportClientData[]>([]);
 
-  useEffect(() => {
-    // Get all unique account owners
-    const owners = new Set(clients.map(client => client.accountOwner));
-    setSelectedOwners(owners);
-  }, [clients]);
-
   const handleOwnerSelection = (owner: string) => {
     const newSelected = new Set(selectedOwners);
     if (newSelected.has(owner)) {
@@ -713,8 +707,15 @@ export default function ClientTracker() {
   const handleImportClients = () => {
     try {
       const parsedImportData = parseImportData(importText);
-      setImportData(parsedImportData);  // Store the parsed data
-      console.log('Initial parsed data:', parsedImportData);
+      setImportData(parsedImportData);
+
+      // Only set initial owners if none are selected
+      if (selectedOwners.size === 0) {
+        const initialOwners = new Set(
+          parsedImportData.map(data => data.accountOwner.trim())
+        );
+        setSelectedOwners(initialOwners);
+      }
 
       // Group by account name and account owner
       const clientGroups = parsedImportData.reduce((acc, row) => {
@@ -844,8 +845,67 @@ export default function ClientTracker() {
   }
 
   const ProductFilter = () => {
+    // Local state to track changes before applying them
+    const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set(selectedProducts));
+    const [open, setOpen] = useState(false);
+
+    // Handle applying changes when dropdown closes
+    const handleOpenChange = (isOpen: boolean) => {
+      setOpen(isOpen);
+      if (!isOpen && !areSetsEqual(pendingSelections, selectedProducts)) {
+        // Apply all changes at once when closing
+        const addedProducts = new Set(
+          Array.from(pendingSelections).filter(x => !selectedProducts.has(x))
+        );
+        
+        // Update clients with new product data
+        const updatedClients = clients.map(client => {
+          let updatedClient = { ...client };
+          
+          // Add new products
+          addedProducts.forEach(product => {
+            const existingProduct = client.products.find(p => 
+              p.name === product || 
+              PRODUCT_NAME_MAPPING[p.name] === product ||
+              (product === 'SMS/MMS' && p.name === 'SMS/MMS')
+            );
+            
+            if (existingProduct) {
+              updatedClient.products = updatedClient.products.map(p => 
+                p.id === existingProduct.id 
+                  ? { ...p, name: product }
+                  : p
+              );
+            } else {
+              updatedClient.products.push({
+                id: `new-${Math.random().toString(36).substr(2, 9)}`,
+                name: product,
+                contracted: 0,
+                current: 0,
+                progress: 0,
+                startDate: client.startDate,
+                endDate: client.endDate,
+                periodQty: [],
+                growthRate: 0,
+                forecastedEndQty: 0
+              });
+            }
+          });
+
+          return updatedClient;
+        });
+
+        setSelectedProducts(pendingSelections);
+        setClients(updatedClients);
+      }
+    };
+
+    // Helper function to compare sets
+    const areSetsEqual = (a: Set<string>, b: Set<string>) => 
+      a.size === b.size && Array.from(a).every(value => b.has(value));
+
     return (
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
           <Button 
             variant="outline" 
@@ -857,67 +917,22 @@ export default function ClientTracker() {
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-56 p-2">
           {PRODUCT_OPTIONS.filter(option => !['Custom'].includes(option as string)).map((product) => (
-            <div key={product} className="flex items-center space-x-2 p-2">
+            <div 
+              key={product} 
+              className="flex items-center space-x-2 p-2"
+              onClick={(e) => e.stopPropagation()}
+            >
               <Checkbox
                 id={`filter-${product}`}
-                checked={selectedProducts.has(product)}
+                checked={pendingSelections.has(product)}
                 onCheckedChange={(checked) => {
-                  const newSelected = new Set(selectedProducts)
+                  const newSelected = new Set(pendingSelections);
                   if (checked) {
-                    // Add the product to selected products
-                    newSelected.add(product)
-                    setSelectedProducts(newSelected)
-                    
-                    // Update clients state with new product data
-                    const updatedClients = clients.map(client => {
-                      // Find any existing product that matches (including mapped names)
-                      const existingProduct = client.products.find(p => 
-                        p.name === product || 
-                        PRODUCT_NAME_MAPPING[p.name] === product ||
-                        (product === 'SMS/MMS' && p.name === 'SMS/MMS') // Special case for SMS/MMS
-                      )
-                      
-                      if (existingProduct) {
-                        // If product exists, ensure it has the correct name mapping
-                        return {
-                          ...client,
-                          products: client.products.map(p => 
-                            p.id === existingProduct.id 
-                              ? { ...p, name: product } // Use the standardized name
-                              : p
-                          )
-                        }
-                      }
-                      
-                      // If no matching product exists, add a new one
-                      return {
-                        ...client,
-                        products: [
-                          ...client.products,
-                          {
-                            id: `new-${Math.random().toString(36).substr(2, 9)}`,
-                            name: product, // Use the standardized name
-                            contracted: 0,
-                            current: 0,
-                            progress: 0,
-                            startDate: client.startDate,
-                            endDate: client.endDate,
-                            periodQty: [],
-                            growthRate: 0,
-                            forecastedEndQty: 0
-                          }
-                        ]
-                      }
-                    })
-                    
-                    setClients(updatedClients)
-                  } else {
-                    // Remove product if it's not the last one
-                    if (newSelected.size > 1) {
-                      newSelected.delete(product)
-                      setSelectedProducts(newSelected)
-                    }
+                    newSelected.add(product);
+                  } else if (newSelected.size > 1) {
+                    newSelected.delete(product);
                   }
+                  setPendingSelections(newSelected);
                 }}
               />
               <label
@@ -930,8 +945,8 @@ export default function ClientTracker() {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-    )
-  }
+    );
+  };
 
   const exportToCSV = () => {
     // Create headers
@@ -1036,6 +1051,80 @@ export default function ClientTracker() {
     document.body.removeChild(link);
   };
 
+  const AccountOwnerFilter = () => {
+    const [pendingOwners, setPendingOwners] = useState<Set<string>>(new Set(selectedOwners));
+    const [open, setOpen] = useState(false);
+
+    // Update pendingOwners when selectedOwners changes
+    useEffect(() => {
+      setPendingOwners(new Set(selectedOwners));
+    }, [selectedOwners]);
+
+    // Helper function to compare sets
+    const areSetsEqual = (a: Set<string>, b: Set<string>) => 
+      a.size === b.size && Array.from(a).every(value => b.has(value));
+
+    const handleOpenChange = (isOpen: boolean) => {
+      setOpen(isOpen);
+      if (!isOpen && !areSetsEqual(pendingOwners, selectedOwners)) {
+        setSelectedOwners(pendingOwners);
+      }
+    };
+
+    // Get all unique account owners from clients
+    const allOwners = Array.from(new Set(clients.map(client => client.accountOwner)));
+
+    return (
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-8 text-left w-full justify-between font-bold text-sm px-2"
+          >
+            Account Owner
+            <ChevronDown className="ml-2 h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuItem onClick={() => handleSort("accountOwner")}>
+            Sort by Account Owner
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <div className="p-2">
+            {allOwners.map((owner) => (
+              <div 
+                key={owner} 
+                className="flex items-center space-x-2 p-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Checkbox
+                  id={`owner-${owner}`}
+                  checked={pendingOwners.has(owner)}
+                  onCheckedChange={(checked) => {
+                    const newSelected = new Set(pendingOwners);
+                    if (checked) {
+                      newSelected.add(owner);
+                    } else if (newSelected.size > 1) {
+                      newSelected.delete(owner);
+                    }
+                    setPendingOwners(newSelected);
+                  }}
+                />
+                <label
+                  htmlFor={`owner-${owner}`}
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  {owner}
+                </label>
+              </div>
+            ))}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
   return (
     <div className="fixed inset-0 bg-gray-50 p-4 sm:p-6 lg:p-8">
       <div className="h-full max-w-[1400px] mx-auto">
@@ -1137,358 +1226,318 @@ export default function ClientTracker() {
               </div>
               <div className="flex-1 overflow-hidden">
                 <div className="relative h-full">
-                  {/* Outer container for horizontal scrolling */}
-                  <div className="overflow-x-auto">
-                    <div className="min-w-max">
-                      {/* Fixed header */}
-                      <div className="sticky top-0 bg-white z-20">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
+                  {/* Single container for both horizontal and vertical scrolling */}
+                  <div className="overflow-auto h-full max-h-[calc(100vh-250px)]">
+                    <div className="min-w-max"> {/* Ensures minimum width for all content */}
+                      <Table>
+                        {/* Fixed header */}
+                        <TableHeader className="sticky top-0 bg-white z-20">
+                          <TableRow>
+                            <TableHead 
+                              className="w-[25%] pr-0 bg-white border-b"
+                              style={{ minWidth: '150px' }}
+                            >
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-8 text-left w-full justify-between font-bold text-sm px-2"
+                                  >
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-bold">Client</span>
+                                      {sortConfig.column === 'name' && 
+                                        <span className="text-muted-foreground font-normal"> (Sorted by: Name)</span>
+                                      }
+                                    </div>
+                                    <ChevronDown className="ml-2 h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start">
+                                  <DropdownMenuItem 
+                                    onClick={() => handleSort("name")}
+                                    className={cn(
+                                      sortConfig.column === 'name' && "bg-accent"
+                                    )}
+                                  >
+                                    Sort by Name
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableHead>
+                            <TableHead 
+                              className="w-[25%] pl-2 bg-white border-b"
+                              style={{ minWidth: '150px' }}
+                            >
+                              <AccountOwnerFilter />
+                            </TableHead>
+                            {Array.from(selectedProducts).map((productName) => (
                               <TableHead 
-                                className="w-[25%] pr-0 bg-white border-b"
-                                style={{ minWidth: '150px' }}
+                                key={productName} 
+                                className="w-[50%] px-4 bg-white border-b"
+                                style={{ minWidth: '450px' }}
                               >
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="sm" 
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
                                       className="h-8 text-left w-full justify-between font-bold text-sm px-2"
                                     >
                                       <div className="flex items-center gap-1">
-                                        <span className="font-bold">Client</span>
-                                        {sortConfig.column === 'name' && 
-                                          <span className="text-muted-foreground font-normal"> (Sorted by: Name)</span>
-                                        }
+                                        <span className="font-bold">{productName}</span>
+                                        {activeSort?.productName === productName && (
+                                          <span className="text-muted-foreground font-normal"> (Sorted by: {activeSort.sortType === 'usage-desc' 
+                                            ? 'Highest to Lowest' 
+                                            : activeSort.sortType === 'usage-asc'
+                                            ? 'Lowest to Highest'
+                                            : 'Contract End Date'})</span>
+                                        )}
                                       </div>
                                       <ChevronDown className="ml-2 h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="start">
                                     <DropdownMenuItem 
-                                      onClick={() => handleSort("name")}
+                                      onClick={() => handleProductSort(productName, 'usage-desc')}
                                       className={cn(
-                                        sortConfig.column === 'name' && "bg-accent"
+                                        activeSort?.productName === productName && 
+                                        activeSort.sortType === 'usage-desc' && 
+                                        "bg-accent"
                                       )}
                                     >
-                                      Sort by Name
+                                      Sort by Usage (Highest to Lowest)
                                     </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </TableHead>
-                              <TableHead 
-                                className="w-[25%] pl-2 bg-white border-b"
-                                style={{ minWidth: '150px' }}
-                              >
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="sm" 
-                                      className="h-8 text-left w-full justify-between font-bold text-sm px-2"
+                                    <DropdownMenuItem 
+                                      onClick={() => handleProductSort(productName, 'usage-asc')}
+                                      className={cn(
+                                        activeSort?.productName === productName && 
+                                        activeSort.sortType === 'usage-asc' && 
+                                        "bg-accent"
+                                      )}
                                     >
-                                      Account Owner
-                                      <ChevronDown className="ml-2 h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="start" className="w-56">
-                                    <DropdownMenuItem onClick={() => handleSort("accountOwner")}>
-                                      Sort by Account Owner
+                                      Sort by Usage (Lowest to Highest)
                                     </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <div className="p-2">
-                                      {Array.from(new Set(clients.map(client => client.accountOwner))).map((owner) => (
-                                        <div key={owner} className="flex items-center space-x-2 p-2">
-                                          <Checkbox
-                                            id={`owner-${owner}`}
-                                            checked={selectedOwners.has(owner)}
-                                            onCheckedChange={() => handleOwnerSelection(owner)}
-                                          />
-                                          <label
-                                            htmlFor={`owner-${owner}`}
-                                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                          >
-                                            {owner}
-                                          </label>
-                                        </div>
-                                      ))}
-                                    </div>
+                                    <DropdownMenuItem 
+                                      onClick={() => handleProductSort(productName, 'endDate')}
+                                      className={cn(
+                                        activeSort?.productName === productName && 
+                                        activeSort.sortType === 'endDate' && 
+                                        "bg-accent"
+                                      )}
+                                    >
+                                      Sort by Contract End Date
+                                    </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </TableHead>
-                              {Array.from(selectedProducts).map((productName) => (
-                                <TableHead 
-                                  key={productName} 
-                                  className="w-[50%] px-4 bg-white border-b"
-                                  style={{ minWidth: '450px' }}
-                                >
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 text-left w-full justify-between font-bold text-sm px-2"
-                                      >
-                                        <div className="flex items-center gap-1">
-                                          <span className="font-bold">{productName}</span>
-                                          {activeSort?.productName === productName && (
-                                            <span className="text-muted-foreground font-normal"> (Sorted by: {activeSort.sortType === 'usage-desc' 
-                                              ? 'Highest to Lowest' 
-                                              : activeSort.sortType === 'usage-asc'
-                                              ? 'Lowest to Highest'
-                                              : 'Contract End Date'})</span>
-                                          )}
-                                        </div>
-                                        <ChevronDown className="ml-2 h-4 w-4" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="start">
-                                      <DropdownMenuItem 
-                                        onClick={() => handleProductSort(productName, 'usage-desc')}
-                                        className={cn(
-                                          activeSort?.productName === productName && 
-                                          activeSort.sortType === 'usage-desc' && 
-                                          "bg-accent"
-                                        )}
-                                      >
-                                        Sort by Usage (Highest to Lowest)
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem 
-                                        onClick={() => handleProductSort(productName, 'usage-asc')}
-                                        className={cn(
-                                          activeSort?.productName === productName && 
-                                          activeSort.sortType === 'usage-asc' && 
-                                          "bg-accent"
-                                        )}
-                                      >
-                                        Sort by Usage (Lowest to Highest)
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem 
-                                        onClick={() => handleProductSort(productName, 'endDate')}
-                                        className={cn(
-                                          activeSort?.productName === productName && 
-                                          activeSort.sortType === 'endDate' && 
-                                          "bg-accent"
-                                        )}
-                                      >
-                                        Sort by Contract End Date
-                                      </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
-                                </TableHead>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                        </Table>
-                      </div>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
 
-                      {/* Scrollable body */}
-                      <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
-                        <Table>
-                          <TableBody>
-                            {sortedClients.length > 0 ? (
-                              sortedClients.map((client) => (
-                                <TableRow key={client.id} className="hover:bg-gray-50 cursor-pointer">
-                                  <TableCell 
-                                    className="w-[25%] pr-0"
-                                    style={{ minWidth: '150px' }}
-                                  >
-                                    <div 
-                                      className="cursor-pointer"
-                                      onClick={() => {
-                                        console.log('Edit Client clicked:', client);
-                                        setEditingClient(client);
-                                      }}
-                                    >
-                                      {client.name}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell 
-                                    className="w-[25%] pl-2"
-                                    style={{ minWidth: '150px' }}
-                                  >
-                                    {client.accountOwner}
-                                  </TableCell>
-                                  {Array.from(selectedProducts).map((productName) => {
-                                    const product = client.products.find(p => p.name === productName);
-                                    // Ensure contractedAmount is always a number
-                                    const contractedAmount = product ? (utilizationType === 'cumulative' 
-                                      ? (product.termQty ?? product.contracted)  // For cumulative, use termQty
-                                      : (product.annualQty ?? product.contracted)) // For annual, use annualQty
-                                    : 0;
-                                    
-                                    return (
-                                      <TableCell 
-                                        key={productName} 
-                                        className="w-[50%] px-4"
-                                        style={{ minWidth: '450px' }}
-                                      >
-                                        {product && product.contracted > 0 ? (
-                                          <div className="space-y-2">
-                                            <div className="flex justify-between items-start w-full">
-                                              <div 
-                                                className="text-xs text-muted-foreground mb-1 cursor-pointer"
-                                                onClick={() => {
-                                                  console.log('Edit Product clicked:', {
-                                                    clientId: client.id,
-                                                    product: product
-                                                  });
-                                                  setEditingProduct({ 
-                                                    clientId: client.id, 
-                                                    product: {
-                                                      ...product,
-                                                      contracted: contractedAmount
-                                                    }
-                                                  });
-                                                }}
-                                              >
-                                                Contracted: {Number(contractedAmount).toLocaleString(undefined, { maximumFractionDigits: 0 })} / 
-                                                Current: {Number(product.current).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                              </div>
-                                              <div className="text-xs text-muted-foreground mb-1 shrink-0 ml-4">
-                                                Renewal: {calculateFiscalQuarter(product.endDate)}
-                                              </div>
-                                            </div>
-                                            <div className="flex items-center gap-2 w-full">
-                                              <ProgressBar
-                                                contracted={contractedAmount}
-                                                current={product.current}
-                                                startDate={product.startDate}
-                                                endDate={product.endDate}
-                                                annualQty={product.annualQty}
-                                                termQty={product.termQty}
-                                                utilizationType={utilizationType}
-                                                usageDate={new Date().toISOString()}
-                                                showStatus={false}
-                                              />
-                                              <TooltipProvider>
-                                                <Tooltip>
-                                                  <TooltipTrigger>
-                                                    <div 
-                                                      className="px-3 py-0.5 rounded-full text-xs font-medium shrink-0 whitespace-nowrap"
-                                                      style={{ 
-                                                        backgroundColor: product.current > contractedAmount ? '#ef4444' : getStatusColor(
-                                                          calculateUtilizationStatus(
-                                                            product.current,
-                                                            contractedAmount,
-                                                            product.startDate,
-                                                            new Date().toISOString(),
-                                                            utilizationType,
-                                                            product.endDate
-                                                          ).status
-                                                        ),
-                                                        color: 'white'
-                                                      }}
-                                                    >
-                                                      {getStatusLabel(calculateUtilizationStatus(
-                                                        product.current,
-                                                        contractedAmount,
-                                                        product.startDate,
-                                                        new Date().toISOString(),
-                                                        utilizationType,
-                                                        product.endDate
-                                                      ).status)}
-                                                    </div>
-                                                  </TooltipTrigger>
-                                                  <TooltipContent>
-                                                    <div className="text-xs">
-                                                      <div>{getStatusText(calculateUtilizationStatus(
-                                                        product.current,
-                                                        contractedAmount,
-                                                        product.startDate,
-                                                        new Date().toISOString(),
-                                                        utilizationType,
-                                                        product.endDate
-                                                      ).status)}</div>
-                                                      <div>
-                                                        Expected: {Math.round(calculateUtilizationStatus(
-                                                          product.current,
-                                                          contractedAmount,
-                                                          product.startDate,
-                                                          new Date().toISOString(),
-                                                          utilizationType,
-                                                          product.endDate
-                                                        ).expectedAmount).toLocaleString()} at {calculateUtilizationStatus(
-                                                          product.current,
-                                                          contractedAmount,
-                                                          product.startDate,
-                                                          new Date().toISOString(),
-                                                          utilizationType,
-                                                          product.endDate
-                                                        ).monthsElapsed} {calculateUtilizationStatus(
-                                                          product.current,
-                                                          contractedAmount,
-                                                          product.startDate,
-                                                          new Date().toISOString(),
-                                                          utilizationType,
-                                                          product.endDate
-                                                        ).monthsElapsed === 1 ? 'month' : 'months'} into contract
-                                                      </div>
-                                                      <div>Current: {product.current.toLocaleString()}</div>
-                                                      {product.current > contractedAmount && (
-                                                        <div>Over by: {(product.current - contractedAmount).toLocaleString()}</div>
-                                                      )}
-                                                    </div>
-                                                  </TooltipContent>
-                                                </Tooltip>
-                                              </TooltipProvider>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className="text-sm text-gray-400">No data</div>
-                                        )}
-                                      </TableCell>
-                                    )
-                                  })}
-                                </TableRow>
-                              ))
-                            ) : (
-                              <TableRow>
+                        {/* Table body */}
+                        <TableBody>
+                          {sortedClients.length > 0 ? (
+                            sortedClients.map((client) => (
+                              <TableRow key={client.id} className="hover:bg-gray-50 cursor-pointer">
                                 <TableCell 
-                                  colSpan={2 + selectedProducts.size} 
-                                  className="h-[400px] text-center"
+                                  className="w-[25%] pr-0"
+                                  style={{ minWidth: '150px' }}
                                 >
-                                  <div className="flex flex-col items-center justify-center gap-4">
-                                    <div className="rounded-full bg-gray-50 p-6">
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="48"
-                                        height="48"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className="text-gray-400"
-                                      >
-                                        <path d="M17 6.3a3 3 0 0 1 4 0"/>
-                                        <path d="M3 6.3a3 3 0 0 0-4 0"/>
-                                        <path d="M20 15.6a9 9 0 0 1-16 0"/>
-                                        <circle cx="8" cy="9" r="3"/>
-                                        <circle cx="16" cy="9" r="3"/>
-                                      </svg>
-                                    </div>
-                                    <div className="text-xl font-medium text-gray-900">Explore Your Usage Data</div>
-                                    <div className="text-sm text-gray-500">
-                                      Import your client data to get started with insights
-                                    </div>
-                                    <Button 
-                                      variant="outline" 
-                                      className="h-10 px-4 py-2 bg-white hover:bg-gray-50 font-medium"
-                                      onClick={() => setIsImportDialogOpen(true)}
-                                    >
-                                      <Plus className="mr-2 h-4 w-4" />
-                                      Import Data
-                                    </Button>
+                                  <div 
+                                    className="cursor-pointer"
+                                    onClick={() => {
+                                      console.log('Edit Client clicked:', client);
+                                      setEditingClient(client);
+                                    }}
+                                  >
+                                    {client.name}
                                   </div>
                                 </TableCell>
+                                <TableCell 
+                                  className="w-[25%] pl-2"
+                                  style={{ minWidth: '150px' }}
+                                >
+                                  {client.accountOwner}
+                                </TableCell>
+                                {Array.from(selectedProducts).map((productName) => {
+                                  const product = client.products.find(p => p.name === productName);
+                                  // Ensure contractedAmount is always a number
+                                  const contractedAmount = product ? (utilizationType === 'cumulative' 
+                                    ? (product.termQty ?? product.contracted)  // For cumulative, use termQty
+                                    : (product.annualQty ?? product.contracted)) // For annual, use annualQty
+                                  : 0;
+                                  
+                                  return (
+                                    <TableCell 
+                                      key={productName} 
+                                      className="w-[50%] px-4"
+                                      style={{ minWidth: '450px' }}
+                                    >
+                                      {product && product.contracted > 0 ? (
+                                        <div className="space-y-2">
+                                          <div className="flex justify-between items-start w-full">
+                                            <div 
+                                              className="text-xs text-muted-foreground mb-1 cursor-pointer"
+                                              onClick={() => {
+                                                console.log('Edit Product clicked:', {
+                                                  clientId: client.id,
+                                                  product: product
+                                                });
+                                                setEditingProduct({ 
+                                                  clientId: client.id, 
+                                                  product: {
+                                                    ...product,
+                                                    contracted: contractedAmount
+                                                  }
+                                                });
+                                              }}
+                                            >
+                                              Contracted: {Number(contractedAmount).toLocaleString(undefined, { maximumFractionDigits: 0 })} / 
+                                              Current: {Number(product.current).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground mb-1 shrink-0 ml-4">
+                                              Renewal: {calculateFiscalQuarter(product.endDate)}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2 w-full">
+                                            <ProgressBar
+                                              contracted={contractedAmount}
+                                              current={product.current}
+                                              startDate={product.startDate}
+                                              endDate={product.endDate}
+                                              annualQty={product.annualQty}
+                                              termQty={product.termQty}
+                                              utilizationType={utilizationType}
+                                              usageDate={new Date().toISOString()}
+                                              showStatus={false}
+                                            />
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger>
+                                                  <div 
+                                                    className="px-3 py-0.5 rounded-full text-xs font-medium shrink-0 whitespace-nowrap"
+                                                    style={{ 
+                                                      backgroundColor: product.current > contractedAmount ? '#ef4444' : getStatusColor(
+                                                        calculateUtilizationStatus(
+                                                          product.current,
+                                                          contractedAmount,
+                                                          product.startDate,
+                                                          new Date().toISOString(),
+                                                          utilizationType,
+                                                          product.endDate
+                                                        ).status
+                                                      ),
+                                                      color: 'white'
+                                                    }}
+                                                  >
+                                                    {getStatusLabel(calculateUtilizationStatus(
+                                                      product.current,
+                                                      contractedAmount,
+                                                      product.startDate,
+                                                      new Date().toISOString(),
+                                                      utilizationType,
+                                                      product.endDate
+                                                    ).status)}
+                                                  </div>
+                                                </TooltipTrigger>
+                                                <TooltipContent>
+                                                  <div className="text-xs">
+                                                    <div>{getStatusText(calculateUtilizationStatus(
+                                                      product.current,
+                                                      contractedAmount,
+                                                      product.startDate,
+                                                      new Date().toISOString(),
+                                                      utilizationType,
+                                                      product.endDate
+                                                    ).status)}</div>
+                                                    <div>
+                                                      Expected: {Math.round(calculateUtilizationStatus(
+                                                        product.current,
+                                                        contractedAmount,
+                                                        product.startDate,
+                                                        new Date().toISOString(),
+                                                        utilizationType,
+                                                        product.endDate
+                                                      ).expectedAmount).toLocaleString()} at {calculateUtilizationStatus(
+                                                        product.current,
+                                                        contractedAmount,
+                                                        product.startDate,
+                                                        new Date().toISOString(),
+                                                        utilizationType,
+                                                        product.endDate
+                                                      ).monthsElapsed} {calculateUtilizationStatus(
+                                                        product.current,
+                                                        contractedAmount,
+                                                        product.startDate,
+                                                        new Date().toISOString(),
+                                                        utilizationType,
+                                                        product.endDate
+                                                      ).monthsElapsed === 1 ? 'month' : 'months'} into contract
+                                                    </div>
+                                                    <div>Current: {product.current.toLocaleString()}</div>
+                                                    {product.current > contractedAmount && (
+                                                      <div>Over by: {(product.current - contractedAmount).toLocaleString()}</div>
+                                                    )}
+                                                  </div>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-gray-400">No data</div>
+                                      )}
+                                    </TableCell>
+                                  )
+                                })}
                               </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell 
+                                colSpan={2 + selectedProducts.size} 
+                                className="h-[400px] text-center"
+                              >
+                                <div className="flex flex-col items-center justify-center gap-4">
+                                  <div className="rounded-full bg-gray-50 p-6">
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      width="48"
+                                      height="48"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      className="text-gray-400"
+                                    >
+                                      <path d="M17 6.3a3 3 0 0 1 4 0"/>
+                                      <path d="M3 6.3a3 3 0 0 0-4 0"/>
+                                      <path d="M20 15.6a9 9 0 0 1-16 0"/>
+                                      <circle cx="8" cy="9" r="3"/>
+                                      <circle cx="16" cy="9" r="3"/>
+                                    </svg>
+                                  </div>
+                                  <div className="text-xl font-medium text-gray-900">Explore Your Usage Data</div>
+                                  <div className="text-sm text-gray-500">
+                                    Import your client data to get started with insights
+                                  </div>
+                                  <Button 
+                                    variant="outline" 
+                                    className="h-10 px-4 py-2 bg-white hover:bg-gray-50 font-medium"
+                                    onClick={() => setIsImportDialogOpen(true)}
+                                  >
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Import Data
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
                     </div>
                   </div>
                 </div>
