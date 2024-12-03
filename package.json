@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "vercel-build": "next build"
+    "vercel-build": "npm install && next build"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.1.2",
