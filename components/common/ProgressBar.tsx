@@ -14,6 +14,7 @@ export interface ProgressBarProps {
   termQty?: number
   utilizationType?: 'annual' | 'cumulative'
   usageDate: string
+  showStatus?: boolean
 }
 
 export type UtilizationStatus = 'exceeding' | 'on-target' | 'over-pacing' | 'under-pacing';
@@ -23,38 +24,77 @@ export const calculateUtilizationStatus = (
   contracted: number,
   startDate: string,
   usageDate: string,
-  utilizationType: 'annual' | 'cumulative'
+  utilizationType: 'annual' | 'cumulative',
+  endDate?: string
 ): { status: UtilizationStatus; expectedAmount: number; monthsElapsed: number } => {
   const start = new Date(startDate);
   const usage = new Date(usageDate);
   
   if (utilizationType === 'annual') {
     start.setFullYear(usage.getFullYear());
-  }
-  
-  const monthsElapsed = (usage.getFullYear() - start.getFullYear()) * 12 + 
-    (usage.getMonth() - start.getMonth()) +
-    (usage.getDate() < start.getDate() ? 0 : 1);
+    const monthsElapsed = (usage.getMonth() - start.getMonth()) +
+      (usage.getDate() < start.getDate() ? 0 : 1);
+    const monthlyRate = contracted / 12;
+    const expectedAmount = monthlyRate * monthsElapsed;
+    
+    if (current > contracted) {
+      return { 
+        status: 'exceeding', 
+        expectedAmount,
+        monthsElapsed
+      };
+    }
 
-  const monthlyRate = contracted / 12;
-  const expectedAmount = monthlyRate * monthsElapsed;
+    const variance = Math.abs(current - expectedAmount) / expectedAmount * 100;
 
-  if (current > contracted) {
-    return { 
-      status: 'exceeding', 
-      expectedAmount,
-      monthsElapsed
-    };
-  }
-
-  const variance = Math.abs(current - expectedAmount) / expectedAmount * 100;
-
-  if (variance <= 10) {
-    return { status: 'on-target', expectedAmount, monthsElapsed };
-  } else if (current > expectedAmount) {
-    return { status: 'over-pacing', expectedAmount, monthsElapsed };
+    if (variance <= 10) {
+      return { status: 'on-target', expectedAmount, monthsElapsed };
+    } else if (current > expectedAmount) {
+      return { status: 'over-pacing', expectedAmount, monthsElapsed };
+    } else {
+      return { status: 'under-pacing', expectedAmount, monthsElapsed };
+    }
   } else {
-    return { status: 'under-pacing', expectedAmount, monthsElapsed };
+    if (!endDate) {
+      return {
+        status: 'under-pacing',
+        expectedAmount: 0,
+        monthsElapsed: 0
+      };
+    }
+
+    const end = new Date(endDate);
+    
+    const totalContractMonths = 
+      (end.getFullYear() - start.getFullYear()) * 12 + 
+      (end.getMonth() - start.getMonth());
+    
+    const monthlyContractedAmount = contracted / totalContractMonths;
+    
+    const monthsElapsed = 
+      (usage.getFullYear() - start.getFullYear()) * 12 + 
+      (usage.getMonth() - start.getMonth()) +
+      (usage.getDate() < start.getDate() ? 0 : 1);
+    
+    const expectedAmount = monthlyContractedAmount * monthsElapsed;
+
+    if (current > contracted) {
+      return { 
+        status: 'exceeding', 
+        expectedAmount,
+        monthsElapsed 
+      };
+    }
+
+    const variance = Math.abs(current - expectedAmount) / expectedAmount * 100;
+
+    if (variance <= 10) {
+      return { status: 'on-target', expectedAmount, monthsElapsed };
+    } else if (current > expectedAmount) {
+      return { status: 'over-pacing', expectedAmount, monthsElapsed };
+    } else {
+      return { status: 'under-pacing', expectedAmount, monthsElapsed };
+    }
   }
 };
 
@@ -111,7 +151,8 @@ export function ProgressBar({
   annualQty,
   termQty,
   utilizationType = 'annual',
-  usageDate
+  usageDate,
+  showStatus = true
 }: ProgressBarProps) {
   const effectiveContracted = utilizationType === 'annual' 
     ? (annualQty || contracted) 
@@ -124,12 +165,13 @@ export function ProgressBar({
     ? (effectiveContracted / current) * 100
     : percentage
 
-  calculateUtilizationStatus(
+  const utilization = calculateUtilizationStatus(
     current,
     effectiveContracted,
     startDate,
     usageDate,
-    utilizationType
+    utilizationType,
+    endDate
   );
 
   const getAnnualBreakpoints = () => {
