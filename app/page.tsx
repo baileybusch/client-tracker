@@ -473,8 +473,8 @@ export default function ClientTracker() {
       }
 
       if (sortType === 'endDate') {
-        const dateA = new Date(_productA!.endDate).getTime();
-        const dateB = new Date(_productB!.endDate).getTime();
+        const dateA = new Date(productA!.endDate).getTime();
+        const dateB = new Date(productB!.endDate).getTime();
         return dateA - dateB;
       }
 
@@ -547,8 +547,8 @@ export default function ClientTracker() {
           );
         };
 
-        const _productA = findProduct(a, activeSort.productName);
-        const _productB = findProduct(b, activeSort.productName);
+        const productA = findProduct(a, activeSort.productName);
+        const productB = findProduct(b, activeSort.productName);
 
         // Use the existing product sorting logic
         // ... rest of your product sorting logic ...
