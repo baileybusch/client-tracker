@@ -89,20 +89,6 @@ interface UtilizationData {
   [key: string]: string | number; // For dynamic product columns
 }
 
-interface ImportClientData {
-  accountOwner: string;
-  accountName: string;
-  volumeType: string;
-  startDate: string;
-  endDate: string;
-  annualQty: number;
-  termQty: number;
-  usageDate: string;
-  periodQty: number;
-  consumedQty: number;
-  remainingQty: number;
-}
-
 type SortType = 'usage-desc' | 'usage-asc' | 'endDate';
 
 interface SortConfig {
