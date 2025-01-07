@@ -20,7 +20,7 @@ export const calculateAverageGrowthRate = (growthRates: number[]): number => {
 export const calculateForecastedVolume = (
   lastVolume: number,
   averageGrowthRate: number,
-  months: number
+  months: number = 12
 ): number => {
   return lastVolume * Math.pow(1 + averageGrowthRate / 100, months);
 }; 
