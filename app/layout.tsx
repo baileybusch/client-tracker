@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Client Tracker",
-  description: "Track client ARR, contract volumes, and usage metrics",
+  title: "Client Utilization Tracker",
+  description: "Track client contract volumes and utilization metrics",
 };
 
 export default function RootLayout({

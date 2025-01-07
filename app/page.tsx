@@ -1057,8 +1057,10 @@ export default function ClientTracker() {
 
     // Update pendingOwners when selectedOwners changes
     useEffect(() => {
-      setPendingOwners(new Set(selectedOwners));
-    }, [selectedOwners]);
+      // Instead of watching selectedOwners directly, we'll watch its values
+      const ownerArray = Array.from(selectedOwners);
+      setPendingOwners(new Set(ownerArray));
+    }, []); // Remove the dependency since we're getting fresh values each time
 
     // Helper function to compare sets
     const areSetsEqual = (a: Set<string>, b: Set<string>) => 

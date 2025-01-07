@@ -31,9 +31,22 @@ export const calculateUtilizationStatus = (
   const usage = new Date(usageDate);
   
   if (utilizationType === 'annual') {
-    start.setFullYear(usage.getFullYear());
-    const monthsElapsed = (usage.getMonth() - start.getMonth()) +
-      (usage.getDate() < start.getDate() ? 0 : 1);
+    const currentTermStart = new Date(start);
+    currentTermStart.setFullYear(usage.getFullYear());
+    
+    if (usage > currentTermStart) {
+      currentTermStart.setFullYear(usage.getFullYear());
+    } else {
+      currentTermStart.setFullYear(usage.getFullYear() - 1);
+    }
+    
+    const monthDiff = 
+      (usage.getMonth() - currentTermStart.getMonth()) +
+      (12 * (usage.getFullYear() - currentTermStart.getFullYear()));
+    
+    const monthsElapsed = monthDiff + 
+      (usage.getDate() >= currentTermStart.getDate() ? 1 : 0);
+
     const monthlyRate = contracted / 12;
     const expectedAmount = monthlyRate * monthsElapsed;
     
@@ -65,17 +78,18 @@ export const calculateUtilizationStatus = (
 
     const end = new Date(endDate);
     
+    const monthDiff = 
+      (usage.getFullYear() - start.getFullYear()) * 12 + 
+      (usage.getMonth() - start.getMonth());
+    
+    const monthsElapsed = monthDiff + 
+      (usage.getDate() >= start.getDate() ? 1 : 0);
+    
     const totalContractMonths = 
       (end.getFullYear() - start.getFullYear()) * 12 + 
-      (end.getMonth() - start.getMonth());
+      (end.getMonth() - start.getMonth()) + 1;
     
     const monthlyContractedAmount = contracted / totalContractMonths;
-    
-    const monthsElapsed = 
-      (usage.getFullYear() - start.getFullYear()) * 12 + 
-      (usage.getMonth() - start.getMonth()) +
-      (usage.getDate() < start.getDate() ? 0 : 1);
-    
     const expectedAmount = monthlyContractedAmount * monthsElapsed;
 
     if (current > contracted) {
@@ -118,11 +132,11 @@ export const getStatusText = (status: UtilizationStatus): string => {
     case 'exceeding':
       return 'Currently exceeding contracted amount';
     case 'on-target':
-      return 'Projected on target';
+      return 'On pace with expected volume';
     case 'over-pacing':
-      return 'Projected to go over';
+      return 'Projected to exceed contracted amount';
     case 'under-pacing':
-      return 'Projected to be under';
+      return 'Projected to be under contracted amount';
     default:
       return '';
   }
