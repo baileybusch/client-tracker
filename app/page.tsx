@@ -3,6 +3,7 @@
 import { ChevronDown, Plus, Save } from 'lucide-react'
 import { useState, useEffect } from "react"
 import { cn } from "@/lib/utils"
+import { ImportClientData } from "@/types/client"
 
 import { Button } from "@/components/ui/button"
 import {
