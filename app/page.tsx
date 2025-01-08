@@ -481,12 +481,12 @@ export default function ClientTracker() {
 
         if (productUsageData.length === 0) return product;
 
-        const mostRecent = productUsageData[0];
+        const mostRecentData = productUsageData[0];
         
         // Calculate current based on utilization type
         const currentAmount = newType === 'annual'
-          ? calculateAnnualUsage(productUsageData, product.startDate, mostRecent.usageDate)
-          : mostRecent.consumedQty;
+          ? calculateAnnualUsage(productUsageData, product.startDate, mostRecentData?.usageDate)
+          : mostRecentData?.consumedQty || 0; // Add fallback to 0
 
         return {
           ...product,
@@ -501,9 +501,6 @@ export default function ClientTracker() {
     });
 
     setClients(updatedClients);
-    
-    // Remove the re-sorting logic
-    // This way the order stays the same when toggling between annual/cumulative
   };
 
   const sortedClients = [...clients]
@@ -1410,7 +1407,9 @@ export default function ClientTracker() {
                                                       backgroundColor: product.current > contractedAmount ? '#ef4444' : getStatusColor(
                                                         calculateUtilizationStatus(
                                                           product.current,
-                                                          contractedAmount,
+                                                          utilizationType === 'annual' ? 
+                                                            (product.annualQty || contractedAmount) : 
+                                                            (product.termQty || contractedAmount),
                                                           product.startDate,
                                                           new Date().toISOString(),
                                                           utilizationType,
@@ -1422,7 +1421,9 @@ export default function ClientTracker() {
                                                   >
                                                     {getStatusLabel(calculateUtilizationStatus(
                                                       product.current,
-                                                      contractedAmount,
+                                                      utilizationType === 'annual' ? 
+                                                        (product.annualQty || contractedAmount) : 
+                                                        (product.termQty || contractedAmount),
                                                       product.startDate,
                                                       new Date().toISOString(),
                                                       utilizationType,
@@ -1432,42 +1433,73 @@ export default function ClientTracker() {
                                                 </TooltipTrigger>
                                                 <TooltipContent>
                                                   <div className="text-xs">
-                                                    <div>{getStatusText(calculateUtilizationStatus(
-                                                      product.current,
-                                                      contractedAmount,
-                                                      product.startDate,
-                                                      new Date().toISOString(),
-                                                      utilizationType,
-                                                      product.endDate
-                                                    ).status)}</div>
-                                                    <div>
-                                                      Expected: {Math.round(calculateUtilizationStatus(
-                                                        product.current,
-                                                        contractedAmount,
-                                                        product.startDate,
-                                                        new Date().toISOString(),
-                                                        utilizationType,
-                                                        product.endDate
-                                                      ).expectedAmount).toLocaleString()} at {calculateUtilizationStatus(
-                                                        product.current,
-                                                        contractedAmount,
-                                                        product.startDate,
-                                                        new Date().toISOString(),
-                                                        utilizationType,
-                                                        product.endDate
-                                                      ).monthsElapsed} {calculateUtilizationStatus(
-                                                        product.current,
-                                                        contractedAmount,
-                                                        product.startDate,
-                                                        new Date().toISOString(),
-                                                        utilizationType,
-                                                        product.endDate
-                                                      ).monthsElapsed === 1 ? 'month' : 'months'} into contract
-                                                    </div>
-                                                    <div>Current: {product.current.toLocaleString()}</div>
-                                                    {product.current > contractedAmount && (
-                                                      <div>Over by: {(product.current - contractedAmount).toLocaleString()}</div>
-                                                    )}
+                                                    {(() => {
+                                                      const productUsageData = importData
+                                                        .filter(data => 
+                                                          data.accountName.toLowerCase() === client.name.toLowerCase() && 
+                                                          data.volumeType === product.name
+                                                        )
+                                                        .sort((a, b) => new Date(b.usageDate).getTime() - new Date(a.usageDate).getTime());
+
+                                                      const mostRecentUsageDate = productUsageData[0]?.usageDate || new Date().toISOString();
+                                                      const annualAmount = product.annualQty || contractedAmount || 0;
+                                                      const currentAmount = product.current || 0;
+
+                                                      let expectedAmount = 0;
+                                                      let monthsElapsed = 0;
+
+                                                      try {
+                                                        if (utilizationType === 'annual') {
+                                                          const monthlyQuota = annualAmount / 12;
+                                                          const start = new Date(product.startDate);
+                                                          const usage = new Date(mostRecentUsageDate);
+                                                          monthsElapsed = (usage.getMonth() - start.getMonth()) + 
+                                                            (usage.getDate() >= start.getDate() ? 1 : 0);
+                                                          expectedAmount = monthlyQuota * monthsElapsed * 2;
+                                                        } else {
+                                                          const status = calculateUtilizationStatus(
+                                                            currentAmount,
+                                                            product.termQty || contractedAmount || 0,
+                                                            product.startDate,
+                                                            mostRecentUsageDate,
+                                                            'cumulative',
+                                                            product.endDate
+                                                          );
+                                                          expectedAmount = status.expectedAmount || 0;
+                                                          monthsElapsed = status.monthsElapsed || 0;
+                                                        }
+                                                      } catch (error) {
+                                                        console.error('Error calculating status:', error);
+                                                      }
+
+                                                      const difference = expectedAmount > 0 ? ((currentAmount - expectedAmount) / expectedAmount) * 100 : 0;
+                                                      let statusText = 'On pace with expected volume';
+
+                                                      if (currentAmount >= annualAmount) {
+                                                        statusText = 'Currently exceeding contracted amount';
+                                                      } else if (difference >= 10) {
+                                                        statusText = 'Projected to exceed contracted amount';
+                                                      } else if (difference <= -10) {
+                                                        statusText = 'Projected to be under contracted amount';
+                                                      }
+
+                                                      return (
+                                                        <>
+                                                          <div>{statusText}</div>
+                                                          <div>
+                                                            Expected: {Math.round(expectedAmount).toLocaleString()} at {
+                                                              monthsElapsed
+                                                            } {monthsElapsed === 1 ? 'month' : 'months'} into {
+                                                              utilizationType === 'annual' ? 'year' : 'contract'
+                                                            }
+                                                          </div>
+                                                          <div>Current: {currentAmount.toLocaleString()}</div>
+                                                          {currentAmount > annualAmount && (
+                                                            <div>Over by: {(currentAmount - annualAmount).toLocaleString()}</div>
+                                                          )}
+                                                        </>
+                                                      );
+                                                    })()}
                                                   </div>
                                                 </TooltipContent>
                                               </Tooltip>
