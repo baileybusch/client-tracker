@@ -384,14 +384,17 @@ export default function ClientTracker() {
       if (!isValidA && !isValidB) return 0;
 
       // Calculate usage percentages and status
-      const getProductStatus = (product: Product) => {
+      const getProductStatus = (product: Product): UtilizationStatus => {
         const contracted = utilizationType === 'annual' 
           ? (product.annualQty || product.contracted)
           : (product.termQty || product.contracted);
-        const percentage = (product.current / contracted) * 100;
         
-        if (percentage > 100) return 'exceeding';
+        // If current exceeds total contract amount
+        if (product.current >= contracted) {
+          return 'currently-over';
+        }
         
+        // Get status using our unified calculation
         const { status } = calculateUtilizationStatus(
           product.current,
           contracted,
@@ -400,6 +403,7 @@ export default function ClientTracker() {
           utilizationType,
           product.endDate
         );
+        
         return status;
       };
 
