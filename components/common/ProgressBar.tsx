@@ -17,7 +17,20 @@ export interface ProgressBarProps {
   showStatus?: boolean
 }
 
-export type UtilizationStatus = 'exceeding' | 'on-target' | 'over-pacing' | 'under-pacing';
+export type UtilizationStatus = 'currently-over' | 'over-pace' | 'on-target' | 'under-pace';
+
+interface UtilizationResult {
+  status: UtilizationStatus;
+  expectedAmount: number;
+  monthsElapsed: number;
+  isOverContract: boolean;
+  periodStart: Date;
+  periodEnd: Date;
+}
+
+const VOLUME_THRESHOLD = 2_000_000; // 2 million messages
+const PERCENTAGE_THRESHOLD = 0.05; // 5% for large volumes
+const ON_TARGET_THRESHOLD = 0.02; // 2% under expected
 
 export const calculateUtilizationStatus = (
   current: number,
@@ -26,101 +39,116 @@ export const calculateUtilizationStatus = (
   usageDate: string,
   utilizationType: 'annual' | 'cumulative',
   endDate?: string
-): { status: UtilizationStatus; expectedAmount: number; monthsElapsed: number } => {
+): UtilizationResult => {
   if (!startDate || !usageDate || !contracted) {
-    return { status: 'on-target', expectedAmount: 0, monthsElapsed: 0 };
+    return {
+      status: 'on-target',
+      expectedAmount: 0,
+      monthsElapsed: 0,
+      isOverContract: false,
+      periodStart: new Date(),
+      periodEnd: new Date()
+    };
   }
 
   const start = new Date(startDate);
   const usage = new Date(usageDate);
-  const end = endDate ? new Date(endDate) : new Date(start.getFullYear() + 1, start.getMonth(), start.getDate());
-
-  let monthsElapsed: number;
+  let periodStart: Date;
+  let periodEnd: Date;
   let expectedAmount: number;
+  let monthsElapsed: number;
 
   if (utilizationType === 'annual') {
-    // For annual mode:
-    // Calculate the monthly quota (annual amount divided by 12)
+    // Calculate current annual period based on usage date
+    const yearsSinceStart = usage.getFullYear() - start.getFullYear();
+    periodStart = new Date(start);
+    periodStart.setFullYear(start.getFullYear() + yearsSinceStart);
+    periodEnd = new Date(periodStart);
+    periodEnd.setFullYear(periodStart.getFullYear() + 1);
+
+    // Calculate months elapsed in current annual period
+    monthsElapsed = (usage.getMonth() - periodStart.getMonth()) +
+      (usage.getDate() >= periodStart.getDate() ? 1 : 0);
+    if (monthsElapsed < 0) monthsElapsed += 12;
+
+    // Calculate expected amount for current annual period
     const monthlyQuota = contracted / 12;
-
-    // Calculate months elapsed in the current annual term
-    const monthsSinceStart = (usage.getFullYear() - start.getFullYear()) * 12 + 
-      (usage.getMonth() - start.getMonth()) +
-      (usage.getDate() >= start.getDate() ? 1 : 0);
-
-    // If we're in the first year of the contract
-    if (monthsSinceStart <= 12) {
-      monthsElapsed = monthsSinceStart;
-    } else {
-      // If we're beyond the first year, calculate months elapsed in current annual term
-      const yearsPassed = Math.floor(monthsSinceStart / 12);
-      monthsElapsed = monthsSinceStart - (yearsPassed * 12);
-    }
-
-    // Calculate expected amount based on monthly quota and elapsed months
     expectedAmount = monthlyQuota * monthsElapsed;
   } else {
-    // For cumulative mode:
-    // 1. Calculate total months elapsed since contract start
-    monthsElapsed = (usage.getFullYear() - start.getFullYear()) * 12 + 
+    // Cumulative mode
+    periodStart = start;
+    periodEnd = endDate ? new Date(endDate) : new Date(start.getFullYear() + 1, start.getMonth(), start.getDate());
+    
+    // Calculate total months elapsed since contract start
+    monthsElapsed = (usage.getFullYear() - start.getFullYear()) * 12 +
       (usage.getMonth() - start.getMonth()) +
       (usage.getDate() >= start.getDate() ? 1 : 0);
 
-    // 2. Calculate total contract duration in months
-    const totalContractMonths = (end.getFullYear() - start.getFullYear()) * 12 + 
-      (end.getMonth() - start.getMonth()) +
-      (end.getDate() >= start.getDate() ? 1 : 0);
-
-    // 3. Calculate expected amount based on elapsed portion of total contract
-    expectedAmount = (contracted / totalContractMonths) * monthsElapsed;
+    // Calculate expected amount based on contract duration
+    const totalMonths = (periodEnd.getFullYear() - periodStart.getFullYear()) * 12 +
+      (periodEnd.getMonth() - periodStart.getMonth()) +
+      (periodEnd.getDate() >= periodStart.getDate() ? 1 : 0);
+    
+    expectedAmount = (contracted / totalMonths) * monthsElapsed;
   }
 
-  // Ensure we don't have negative values
-  monthsElapsed = Math.max(0, monthsElapsed);
-  expectedAmount = Math.max(0, expectedAmount);
-
-  // Calculate the percentage difference between actual and expected
-  const difference = expectedAmount > 0 ? ((current - expectedAmount) / expectedAmount) * 100 : 0;
-
-  // Determine status
+  // Determine status using thresholds
+  const isOverContract = current >= contracted;
   let status: UtilizationStatus;
-  if (current >= contracted) {
-    status = 'exceeding';
-  } else if (difference >= 10) {
-    status = 'over-pacing';
-  } else if (difference <= -10) {
-    status = 'under-pacing';
+  
+  if (isOverContract) {
+    status = 'currently-over';
   } else {
-    status = 'on-target';
+    // Calculate how far under/over expected we are as a percentage
+    const percentageOfExpected = expectedAmount > 0 ? current / expectedAmount : 0;
+    
+    if (current > expectedAmount) {
+      // If current exceeds expected at all, it's over pace
+      status = 'over-pace';
+    } else if (percentageOfExpected >= (1 - ON_TARGET_THRESHOLD)) {
+      // If within 2% under expected, it's on target
+      // e.g., if expected is 100M and current is 98.5M (98.5% of expected)
+      status = 'on-target';
+    } else {
+      // If more than 2% under expected, it's under pace
+      status = 'under-pace';
+    }
   }
 
-  return { status, expectedAmount, monthsElapsed };
+  return {
+    status,
+    expectedAmount,
+    monthsElapsed,
+    isOverContract,
+    periodStart,
+    periodEnd
+  };
 };
 
 export const getStatusColor = (status: UtilizationStatus): string => {
   switch (status) {
-    case 'exceeding':
-      return '#ef4444';
+    case 'currently-over':
+      return '#ef4444';  // red
     case 'on-target':
-      return '#22c55e';
-    case 'over-pacing':
-      return '#f97316';
-    case 'under-pacing':
-      return '#3b82f6';
+      return '#22c55e';  // green
+    case 'over-pace':
+      return '#f97316';  // orange
+    case 'under-pace':
+      return '#3b82f6';  // blue
     default:
-      return '#6b7280';
+      return '#6b7280';  // gray
   }
 };
 
 export const getStatusText = (status: UtilizationStatus): string => {
   switch (status) {
-    case 'exceeding':
+    case 'currently-over':
       return 'Currently exceeding contracted amount';
     case 'on-target':
       return 'On pace with expected volume';
-    case 'over-pacing':
+    case 'over-pace':
       return 'Projected to exceed contracted amount';
-    case 'under-pacing':
+    case 'under-pace':
       return 'Projected to be under contracted amount';
     default:
       return '';
@@ -129,13 +157,13 @@ export const getStatusText = (status: UtilizationStatus): string => {
 
 export const getStatusLabel = (status: UtilizationStatus): string => {
   switch (status) {
-    case 'exceeding':
+    case 'currently-over':
       return 'CURRENTLY OVER';
     case 'on-target':
       return 'ON TARGET';
-    case 'over-pacing':
+    case 'over-pace':
       return 'OVER PACE';
-    case 'under-pacing':
+    case 'under-pace':
       return 'UNDER PACE';
     default:
       return '';
