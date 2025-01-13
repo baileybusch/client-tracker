@@ -409,10 +409,10 @@ export default function ClientTracker() {
       // Define status priority (4 = highest, 1 = lowest)
       const getStatusPriority = (status: UtilizationStatus): number => {
         switch (status) {
-          case 'exceeding': return 4;    // Currently Over - highest priority
-          case 'over-pacing': return 3;  // Over Pace - second priority
-          case 'on-target': return 2;    // On Target - third priority
-          case 'under-pacing': return 1; // Under Pace - lowest priority
+          case 'currently-over': return 4;  // Currently Over - highest priority
+          case 'over-pace': return 3;       // Over Pace - second priority
+          case 'on-target': return 2;       // On Target - third priority
+          case 'under-pace': return 1;      // Under Pace - lowest priority
           default: return 0;
         }
       };
