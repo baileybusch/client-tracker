@@ -205,6 +205,140 @@ const calculateAnnualUsage = (
   }, 0);
 };
 
+const getStatusPriority = (status: UtilizationStatus): number => {
+  switch (status) {
+    case 'currently-over': return 4;  // Currently Over - highest priority
+    case 'over-pace': return 3;       // Over Pace - second priority
+    case 'on-target': return 2;       // On Target - third priority
+    case 'under-pace': return 1;      // Under Pace - lowest priority
+    default: return 0;
+  }
+};
+
+const getProductUtilization = (
+  product: Product,
+  utilizationType: 'annual' | 'cumulative',
+  contractedAmount: number,
+  mostRecentUsageDate: string
+) => {
+  const contracted = utilizationType === 'annual'
+    ? (product.annualQty || contractedAmount)
+    : (product.termQty || contractedAmount);
+
+  const utilization = calculateUtilizationStatus(
+    product.current,
+    contracted,
+    product.startDate,
+    mostRecentUsageDate,
+    utilizationType,
+    product.endDate
+  );
+
+  const percentage = (product.current / contracted) * 100;
+
+  return {
+    status: utilization.status,
+    percentage,
+    expectedAmount: utilization.expectedAmount,
+    monthsElapsed: utilization.monthsElapsed,
+    isOverContract: utilization.isOverContract
+  };
+};
+
+const groupAndSortClients = (
+  clients: Client[], 
+  productName: string, 
+  sortType: SortType,
+  utilizationType: 'annual' | 'cumulative',
+  importData: ImportClientData[]
+) => {
+  // If sorting by end date, use a different sorting logic
+  if (sortType === 'endDate') {
+    return clients.sort((a, b) => {
+      const findProduct = (client: Client) => {
+        return client.products.find(p => 
+          p.name === productName || 
+          PRODUCT_NAME_MAPPING[p.name] === productName ||
+          productName === PRODUCT_NAME_MAPPING[p.name]
+        );
+      };
+
+      const productA = findProduct(a);
+      const productB = findProduct(b);
+
+      // Handle cases where products don't exist
+      if (!productA && !productB) return 0;
+      if (!productA) return 1;
+      if (!productB) return -1;
+
+      // Sort by end date (closest date first)
+      const dateA = new Date(productA.endDate).getTime();
+      const dateB = new Date(productB.endDate).getTime();
+      return dateA - dateB;
+    });
+  }
+
+  // Rest of the existing grouping and sorting logic for usage sorts
+  const groups: { [key in UtilizationStatus]: Array<{client: Client; percentage: number}> } = {
+    'currently-over': [],
+    'over-pace': [],
+    'on-target': [],
+    'under-pace': []
+  };
+
+  // First pass: calculate status and percentage for each client and group them
+  clients.forEach(client => {
+    const product = client.products.find(p => 
+      p.name === productName || 
+      PRODUCT_NAME_MAPPING[p.name] === productName ||
+      productName === PRODUCT_NAME_MAPPING[p.name]
+    );
+
+    if (!product || !product.contracted || product.contracted <= 0) return;
+
+    // Get usage data for this product
+    const productUsageData = importData
+      .filter(data => 
+        data.accountName.toLowerCase() === client.name.toLowerCase() && 
+        data.volumeType === product.name
+      )
+      .sort((a, b) => new Date(b.usageDate).getTime() - new Date(a.usageDate).getTime());
+
+    const mostRecentUsageDate = productUsageData[0]?.usageDate || new Date().toISOString();
+    const contractedAmount = utilizationType === 'annual'
+      ? (product.annualQty || product.contracted)
+      : (product.termQty || product.contracted);
+
+    const { status, percentage } = getProductUtilization(
+      product,
+      utilizationType,
+      contractedAmount,
+      mostRecentUsageDate
+    );
+
+    groups[status].push({ client, percentage });
+  });
+
+  // Sort each group by percentage
+  Object.values(groups).forEach(group => {
+    group.sort((a, b) => 
+      sortType === 'usage-desc' 
+        ? b.percentage - a.percentage 
+        : a.percentage - b.percentage
+    );
+  });
+
+  // Combine groups in the correct order
+  const orderedGroups = sortType === 'usage-desc'
+    ? ['currently-over', 'over-pace', 'on-target', 'under-pace']
+    : ['under-pace', 'on-target', 'over-pace', 'currently-over'];
+
+  // Return flattened array of clients in correct order
+  return orderedGroups.flatMap(status => 
+    groups[status as UtilizationStatus].map(item => item.client)
+  );
+};
+
 export default function ClientTracker() {
   const [clients, setClients] = useState<Client[]>(initialClients)
   const [sortConfig, setSortConfig] = useState<SortConfig>({
@@ -422,39 +556,41 @@ export default function ClientTracker() {
       };
 
       if (sortType === 'usage-desc') {
-        // First sort by status priority
+        // Sort by status priority first (CURRENTLY OVER -> OVER PACE -> ON TARGET -> UNDER PACE)
         const priorityDiff = getStatusPriority(statusB) - getStatusPriority(statusA);
         if (priorityDiff !== 0) return priorityDiff;
 
-        // Within same status, sort by percentage
-        const getPercentage = (product: Product) => {
+        // Within same status group, sort by percentage of contracted amount
+        const getUsagePercentage = (product: Product) => {
           const contracted = utilizationType === 'annual'
             ? (product.annualQty || product.contracted)
             : (product.termQty || product.contracted);
           return (product.current / contracted) * 100;
         };
 
-        const percentageA = getPercentage(productA!);
-        const percentageB = getPercentage(productB!);
-        return percentageB - percentageA;
+        // If they have the same status, sort by their usage percentage
+        const percentageA = getUsagePercentage(productA!);
+        const percentageB = getUsagePercentage(productB!);
+        return percentageB - percentageA;  // Higher percentages first
       }
 
       if (sortType === 'usage-asc') {
-        // Reverse the priority for ascending sort
+        // Sort by status priority first (UNDER PACE -> ON TARGET -> OVER PACE -> CURRENTLY OVER)
         const priorityDiff = getStatusPriority(statusA) - getStatusPriority(statusB);
         if (priorityDiff !== 0) return priorityDiff;
 
-        // Within same status, sort by percentage
-        const getPercentage = (product: Product) => {
+        // Within same status group, sort by percentage of contracted amount
+        const getUsagePercentage = (product: Product) => {
           const contracted = utilizationType === 'annual'
             ? (product.annualQty || product.contracted)
             : (product.termQty || product.contracted);
           return (product.current / contracted) * 100;
         };
 
-        const percentageA = getPercentage(productA!);
-        const percentageB = getPercentage(productB!);
-        return percentageA - percentageB;
+        // If they have the same status, sort by their usage percentage
+        const percentageA = getUsagePercentage(productA!);
+        const percentageB = getUsagePercentage(productB!);
+        return percentageA - percentageB;  // Lower percentages first
       }
 
       if (sortType === 'endDate') {
@@ -507,37 +643,31 @@ export default function ClientTracker() {
     setClients(updatedClients);
   };
 
-  const sortedClients = [...clients]
-    .filter(client => selectedOwners.has(client.accountOwner))
-    .sort((a, b) => {
-      // Handle basic column sorting
-      if (sortConfig.column === 'name') {
-        return a.name.localeCompare(b.name);
-      }
-      
-      if (sortConfig.column === 'accountOwner') {
-        return a.accountOwner.localeCompare(b.accountOwner);
-      }
+  const sortedClients = (() => {
+    const filteredClients = clients.filter(client => 
+      selectedOwners.has(client.accountOwner)
+    );
 
-      // If no basic sort is active but there's an active product sort, use that
-      if (activeSort) {
-        const findProduct = (client: Client, name: string) => {
-          return client.products.find(p => 
-            p.name === name || 
-            PRODUCT_NAME_MAPPING[p.name] === name ||
-            name === PRODUCT_NAME_MAPPING[p.name]
-          );
-        };
+    if (sortConfig.column === 'name') {
+      return filteredClients.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    
+    if (sortConfig.column === 'accountOwner') {
+      return filteredClients.sort((a, b) => a.accountOwner.localeCompare(b.accountOwner));
+    }
 
-        const productA = findProduct(a, activeSort.productName);
-        const productB = findProduct(b, activeSort.productName);
+    if (activeSort?.productName) {
+      return groupAndSortClients(
+        filteredClients, 
+        activeSort.productName, 
+        activeSort.sortType,
+        utilizationType,
+        importData
+      );
+    }
 
-        // Use the existing product sorting logic
-        // ... rest of your product sorting logic ...
-      }
-
-      return 0;
-    });
+    return filteredClients;
+  })();
 
   const _handleAddNewProduct = () => {
     const newProduct: Product = {
