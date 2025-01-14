@@ -475,6 +475,20 @@ export default function ClientTracker() {
       sortType: 'default',
       productName: ''
     });
+
+    // Apply sort immediately
+    const sortedClients = [...clients].sort((a, b) => {
+      if (column === 'name') {
+        return a.name.localeCompare(b.name);
+      }
+      if (column === 'accountOwner') {
+        return a.accountOwner.localeCompare(b.accountOwner);
+      }
+      return 0;
+    });
+
+    // Update clients with new sort order
+    setClients(sortedClients);
   };
 
   const handleProductSort = (productName: string, sortType: SortType) => {
@@ -1051,76 +1065,95 @@ export default function ClientTracker() {
   };
 
   const AccountOwnerFilter = () => {
-    const [pendingOwners, setPendingOwners] = useState<Set<string>>(new Set(selectedOwners));
     const [open, setOpen] = useState(false);
-
-    // Update pendingOwners when selectedOwners changes
-    useEffect(() => {
-      // Instead of watching selectedOwners directly, we'll watch its values
-      const ownerArray = Array.from(selectedOwners);
-      setPendingOwners(new Set(ownerArray));
-    }, []); // Remove the dependency since we're getting fresh values each time
-
-    // Helper function to compare sets
-    const areSetsEqual = (a: Set<string>, b: Set<string>) => 
-      a.size === b.size && Array.from(a).every(value => b.has(value));
-
-    const handleOpenChange = (isOpen: boolean) => {
-      setOpen(isOpen);
-      if (!isOpen && !areSetsEqual(pendingOwners, selectedOwners)) {
-        setSelectedOwners(pendingOwners);
-      }
-    };
-
-    // Get all unique account owners from clients
-    const allOwners = Array.from(new Set(clients.map(client => client.accountOwner)));
+    
+    // Get unique account owners from clients
+    const accountOwners = Array.from(new Set(clients.map(client => client.accountOwner))).sort();
 
     return (
-      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <Button 
             variant="ghost" 
             size="sm" 
             className="h-8 text-left w-full justify-between font-bold text-sm px-2"
           >
-            Account Owner
+            <div className="flex items-center gap-1">
+              <span className="font-bold">Account Owner</span>
+              {sortConfig.column === 'accountOwner' && 
+                <span className="text-muted-foreground font-normal"> (Sorted by: Name)</span>
+              }
+            </div>
             <ChevronDown className="ml-2 h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuItem onClick={() => handleSort("accountOwner")}>
+          <DropdownMenuItem 
+            onClick={() => handleSort('accountOwner')}
+            className={cn(
+              sortConfig.column === 'accountOwner' && "bg-accent"
+            )}
+          >
             Sort by Account Owner
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          
           <div className="p-2">
-            {allOwners.map((owner) => (
-              <div 
-                key={owner} 
-                className="flex items-center space-x-2 p-2"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Checkbox
-                  id={`owner-${owner}`}
-                  checked={pendingOwners.has(owner)}
-                  onCheckedChange={(checked) => {
-                    const newSelected = new Set(pendingOwners);
-                    if (checked) {
-                      newSelected.add(owner);
-                    } else if (newSelected.size > 1) {
-                      newSelected.delete(owner);
-                    }
-                    setPendingOwners(newSelected);
-                  }}
-                />
-                <label
-                  htmlFor={`owner-${owner}`}
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  {owner}
-                </label>
-              </div>
-            ))}
+            <div className="mb-2 text-xs font-medium text-muted-foreground">
+              Filter by Account Owner
+            </div>
+            <div className="space-y-2">
+              {accountOwners.map((owner) => (
+                <div key={owner} className="flex items-center space-x-2">
+                  <Checkbox 
+                    id={owner}
+                    checked={selectedOwners.has(owner)}
+                    onCheckedChange={() => handleOwnerSelection(owner)}
+                  />
+                  <label
+                    htmlFor={owner}
+                    className="text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    {owner}
+                  </label>
+                </div>
+              ))}
+            </div>
           </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
+  const ClientFilter = () => {
+    const [open, setOpen] = useState(false);
+
+    return (
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-8 text-left w-full justify-between font-bold text-sm px-2"
+          >
+            <div className="flex items-center gap-1">
+              <span className="font-bold">Client</span>
+              {sortConfig.column === 'name' && 
+                <span className="text-muted-foreground font-normal"> (Sorted by: Name)</span>
+              }
+            </div>
+            <ChevronDown className="ml-2 h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuItem 
+            onClick={() => handleSort('name')}
+            className={cn(
+              sortConfig.column === 'name' && "bg-accent"
+            )}
+          >
+            Sort by Client (A-Z)
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     );
@@ -1235,36 +1268,10 @@ export default function ClientTracker() {
                         <TableHeader className="sticky top-0 bg-white z-20">
                           <TableRow>
                             <TableHead 
-                              className="w-[25%] pr-0 bg-white border-b"
+                              className="w-[25%] pl-2 bg-white border-b"
                               style={{ minWidth: '150px' }}
                             >
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    className="h-8 text-left w-full justify-between font-bold text-sm px-2"
-                                  >
-                                    <div className="flex items-center gap-1">
-                                      <span className="font-bold">Client</span>
-                                      {sortConfig.column === 'name' && 
-                                        <span className="text-muted-foreground font-normal"> (Sorted by: Name)</span>
-                                      }
-                                    </div>
-                                    <ChevronDown className="ml-2 h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start">
-                                  <DropdownMenuItem 
-                                    onClick={() => handleSort("name")}
-                                    className={cn(
-                                      sortConfig.column === 'name' && "bg-accent"
-                                    )}
-                                  >
-                                    Sort by Name
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
+                              <ClientFilter />
                             </TableHead>
                             <TableHead 
                               className="w-[25%] pl-2 bg-white border-b"
