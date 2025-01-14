@@ -962,88 +962,83 @@ export default function ClientTracker() {
   };
 
   const exportToCSV = () => {
+    // Get currently visible clients
+    const visibleClients = sortedClients;
+
     // Create headers
     const headers = [
-      'Client', 
-      'Account Owner', 
-      'Exceeding Annual Volume', 
-      'Exceeding Cumulative Volume'
+      'Client',
+      'Account Owner',
+      'Annual Pacing',
+      'Annual Qty Used',
+      'Cumulative Pacing',
+      'Cumulative Qty Used',
+      'Contract End Date',
+      'Renewal Quarter'
     ];
-    selectedProducts.forEach(product => {
-      headers.push(`${product} Contracted`);
-      headers.push(`${product} Current`);
-      headers.push(`${product} Usage %`);
-      headers.push(`${product} Annual Status`);  // Changed from Status to Annual Status
-      headers.push(`${product} Cumulative Status`);  // Added Cumulative Status
-      headers.push(`${product} End Date`);
-    });
 
     // Create rows
-    const rows = sortedClients.map(client => {
-      // Check if client is exceeding in either mode
-      const exceedingStatus = {
-        annual: false,
-        cumulative: false
-      };
+    const rows = visibleClients.map(client => {
+      // Find the product we're interested in (Email)
+      const product = client.products.find(p => p.name === 'Email');
+      
+      if (!product || !product.contracted) {
+        return [
+          client.name,
+          client.accountOwner,
+          'N/A',
+          'N/A',
+          'N/A',
+          'N/A',
+          'N/A',
+          'N/A'
+        ];
+      }
 
-      client.products.forEach(product => {
-        // Check Annual
-        const annualContracted = product.annualQty || product.contracted;
-        if (annualContracted && product.current > annualContracted) {
-          exceedingStatus.annual = true;
-        }
+      // Get usage data
+      const productUsageData = importData
+        .filter(data => 
+          data.accountName.toLowerCase() === client.name.toLowerCase() && 
+          data.volumeType === product.name
+        )
+        .sort((a, b) => new Date(b.usageDate).getTime() - new Date(a.usageDate).getTime());
 
-        // Check Cumulative
-        const termContracted = product.termQty || product.contracted;
-        if (termContracted && product.current > termContracted) {
-          exceedingStatus.cumulative = true;
-        }
-      });
+      const mostRecentUsageDate = productUsageData[0]?.usageDate || new Date().toISOString();
 
-      const row: (string | number)[] = [
+      // Calculate annual status
+      const annualStatus = calculateUtilizationStatus(
+        product.current,
+        product.annualQty || product.contracted,
+        product.startDate,
+        mostRecentUsageDate,
+        'annual',
+        product.endDate
+      );
+
+      // Calculate cumulative status
+      const cumulativeStatus = calculateUtilizationStatus(
+        product.current,
+        product.termQty || product.contracted,
+        product.startDate,
+        mostRecentUsageDate,
+        'cumulative',
+        product.endDate
+      );
+
+      // Calculate percentages
+      const annualPercentage = ((product.current / (product.annualQty || product.contracted)) * 100).toFixed(1);
+      const cumulativePercentage = ((product.current / (product.termQty || product.contracted)) * 100).toFixed(1);
+
+      return [
         client.name,
         client.accountOwner,
-        exceedingStatus.annual ? 'Yes' : 'No',
-        exceedingStatus.cumulative ? 'Yes' : 'No'
+        getStatusLabel(annualStatus.status),
+        `${annualPercentage}%`,
+        getStatusLabel(cumulativeStatus.status),
+        `${cumulativePercentage}%`,
+        product.endDate,
+        calculateFiscalQuarter(product.endDate)
       ];
-
-      selectedProducts.forEach(productName => {
-        const product = client.products.find(p => p.name === productName);
-        const contractedAmount = product ? (utilizationType === 'cumulative' 
-          ? (product.termQty ?? product.contracted)
-          : (product.annualQty ?? product.contracted)
-        ) : 0;
-        const current = product?.current || 0;
-        const percentage = contractedAmount > 0 ? (current / contractedAmount) * 100 : 0;
-        
-        // Calculate both annual and cumulative status
-        const annualStatus = product ? calculateUtilizationStatus(
-          current,
-          product.annualQty ?? product.contracted,
-          product.startDate,
-          new Date().toISOString(),
-          'annual',
-          product.endDate
-        ).status : '';
-
-        const cumulativeStatus = product ? calculateUtilizationStatus(
-          current,
-          product.termQty ?? product.contracted,
-          product.startDate,
-          new Date().toISOString(),
-          'cumulative',
-          product.endDate
-        ).status : '';
-
-        row.push(contractedAmount);
-        row.push(current);
-        row.push(`${percentage.toFixed(1)}%`);
-        row.push(annualStatus);  // Add Annual Status
-        row.push(cumulativeStatus);  // Add Cumulative Status
-        row.push(product?.endDate || '');
-      });
-
-      return row;
     });
 
     // Combine headers and rows
@@ -1057,7 +1052,7 @@ export default function ClientTracker() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `client-utilization-${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `client-utilization-summary-${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
