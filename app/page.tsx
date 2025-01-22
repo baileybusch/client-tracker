@@ -979,20 +979,10 @@ export default function ClientTracker() {
 
     // Create rows
     const rows = visibleClients.map(client => {
-      // Find the product we're interested in (Email)
       const product = client.products.find(p => p.name === 'Email');
       
       if (!product || !product.contracted) {
-        return [
-          client.name,
-          client.accountOwner,
-          'N/A',
-          'N/A',
-          'N/A',
-          'N/A',
-          'N/A',
-          'N/A'
-        ];
+        return [client.name, client.accountOwner, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A'];
       }
 
       // Get usage data
@@ -1005,7 +995,10 @@ export default function ClientTracker() {
 
       const mostRecentUsageDate = productUsageData[0]?.usageDate || new Date().toISOString();
 
-      // Calculate annual status
+      // Get cumulative consumed quantity from the most recent usage data
+      const cumulativeConsumed = productUsageData[0]?.consumedQty || 0;
+
+      // Calculate annual status using product.current
       const annualStatus = calculateUtilizationStatus(
         product.current,
         product.annualQty || product.contracted,
@@ -1015,9 +1008,9 @@ export default function ClientTracker() {
         product.endDate
       );
 
-      // Calculate cumulative status
+      // Calculate cumulative status using cumulative consumed
       const cumulativeStatus = calculateUtilizationStatus(
-        product.current,
+        cumulativeConsumed,
         product.termQty || product.contracted,
         product.startDate,
         mostRecentUsageDate,
@@ -1027,7 +1020,7 @@ export default function ClientTracker() {
 
       // Calculate percentages
       const annualPercentage = ((product.current / (product.annualQty || product.contracted)) * 100).toFixed(1);
-      const cumulativePercentage = ((product.current / (product.termQty || product.contracted)) * 100).toFixed(1);
+      const cumulativePercentage = ((cumulativeConsumed / (product.termQty || product.contracted)) * 100).toFixed(1);
 
       return [
         client.name,
