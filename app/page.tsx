@@ -964,74 +964,81 @@ export default function ClientTracker() {
   const exportToCSV = () => {
     // Get currently visible clients
     const visibleClients = sortedClients;
+    
+    // Get selected products for columns
+    const selectedProductsList = Array.from(selectedProducts);
 
-    // Create headers
+    // Create headers for each product
     const headers = [
       'Client',
       'Account Owner',
-      'Annual Pacing',
-      'Annual Qty Used',
-      'Cumulative Pacing',
-      'Cumulative Qty Used',
-      'Contract End Date',
-      'Renewal Quarter'
+      ...selectedProductsList.flatMap(product => [
+        `${product} Annual Pacing`,
+        `${product} Annual Qty Used`,
+        `${product} Cumulative Pacing`,
+        `${product} Cumulative Qty Used`,
+        `${product} Contract End Date`,
+        `${product} Renewal Quarter`
+      ])
     ];
 
     // Create rows
     const rows = visibleClients.map(client => {
-      const product = client.products.find(p => p.name === 'Email');
-      
-      if (!product || !product.contracted) {
-        return [client.name, client.accountOwner, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A'];
-      }
+      const baseData = [client.name, client.accountOwner];
 
-      // Get usage data
-      const productUsageData = importData
-        .filter(data => 
-          data.accountName.toLowerCase() === client.name.toLowerCase() && 
-          data.volumeType === product.name
-        )
-        .sort((a, b) => new Date(b.usageDate).getTime() - new Date(a.usageDate).getTime());
+      const productData = selectedProductsList.flatMap(productName => {
+        const product = client.products.find(p => p.name === productName);
+        
+        if (!product || !product.contracted) {
+          return ['N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A'];
+        }
 
-      const mostRecentUsageDate = productUsageData[0]?.usageDate || new Date().toISOString();
+        // Get usage data
+        const productUsageData = importData
+          .filter(data => 
+            data.accountName.toLowerCase() === client.name.toLowerCase() && 
+            data.volumeType === product.name
+          )
+          .sort((a, b) => new Date(b.usageDate).getTime() - new Date(a.usageDate).getTime());
 
-      // Get cumulative consumed quantity from the most recent usage data
-      const cumulativeConsumed = productUsageData[0]?.consumedQty || 0;
+        const mostRecentUsageDate = productUsageData[0]?.usageDate || new Date().toISOString();
+        const cumulativeConsumed = productUsageData[0]?.consumedQty || 0;
 
-      // Calculate annual status using product.current
-      const annualStatus = calculateUtilizationStatus(
-        product.current,
-        product.annualQty || product.contracted,
-        product.startDate,
-        mostRecentUsageDate,
-        'annual',
-        product.endDate
-      );
+        // Calculate annual status
+        const annualStatus = calculateUtilizationStatus(
+          product.current,
+          product.annualQty || product.contracted,
+          product.startDate,
+          mostRecentUsageDate,
+          'annual',
+          product.endDate
+        );
 
-      // Calculate cumulative status using cumulative consumed
-      const cumulativeStatus = calculateUtilizationStatus(
-        cumulativeConsumed,
-        product.termQty || product.contracted,
-        product.startDate,
-        mostRecentUsageDate,
-        'cumulative',
-        product.endDate
-      );
+        // Calculate cumulative status
+        const cumulativeStatus = calculateUtilizationStatus(
+          cumulativeConsumed,
+          product.termQty || product.contracted,
+          product.startDate,
+          mostRecentUsageDate,
+          'cumulative',
+          product.endDate
+        );
 
-      // Calculate percentages
-      const annualPercentage = ((product.current / (product.annualQty || product.contracted)) * 100).toFixed(1);
-      const cumulativePercentage = ((cumulativeConsumed / (product.termQty || product.contracted)) * 100).toFixed(1);
+        // Calculate percentages
+        const annualPercentage = ((product.current / (product.annualQty || product.contracted)) * 100).toFixed(1);
+        const cumulativePercentage = ((cumulativeConsumed / (product.termQty || product.contracted)) * 100).toFixed(1);
 
-      return [
-        client.name,
-        client.accountOwner,
-        getStatusLabel(annualStatus.status),
-        `${annualPercentage}%`,
-        getStatusLabel(cumulativeStatus.status),
-        `${cumulativePercentage}%`,
-        product.endDate,
-        calculateFiscalQuarter(product.endDate)
-      ];
+        return [
+          getStatusLabel(annualStatus.status),
+          `${annualPercentage}%`,
+          getStatusLabel(cumulativeStatus.status),
+          `${cumulativePercentage}%`,
+          product.endDate,
+          calculateFiscalQuarter(product.endDate)
+        ];
+      });
+
+      return [...baseData, ...productData];
     });
 
     // Combine headers and rows
